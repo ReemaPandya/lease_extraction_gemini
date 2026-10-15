@@ -1,258 +1,364 @@
-# Lease Extraction Pipeline — Gemini Free-Tier Edition
+# Lease Extraction Pipeline
 
-A reproducible, cost-aware Python pipeline that extracts lease-document facts into **the exact supplied per-field JSON Schemas**. Tested locally on the three PDFs and three document definitions in `sample_inputs/`.
+A local-first, schema-driven Python pipeline for extracting structured facts from property PDFs. It is designed to reduce repeated LLM calls and document transmission while retaining the original field definitions, evidence provenance, validation, and a reproducible audit trail.
 
-> **Verification status:** All local tests pass, including mocked Gemini REST requests, schema validation, PDF retrieval, caching, retries, and three complete mocked end-to-end flows. **No live Gemini requests were possible without a user-provided API key.** Mocked JSON is intentionally empty and does **not** establish factual extraction accuracy. The CLI fails clearly without a key rather than fabricating extraction results.
+**Repository:** [ReemaPandya/lease_extraction_gemini](https://github.com/ReemaPandya/lease_extraction_gemini)  
+**Python:** 3.10+  
+**Document types:** `Notice: Rent Change`, `Lease: Residential (AST)`, `Lease: Commercial`
 
-> **Free-tier privacy warning:** Under Google’s unpaid Gemini API terms, submitted content may be used to improve Google products and may be reviewed by humans. Never send confidential leases, tenant data, or other personal information to the free tier. Use appropriately redacted/synthetic PDFs, or use an approved paid/private service. Your selected PDF text excerpts **are** sent to the API during live extraction.
+> **Branch guide:** `main` contains the original **Gemini-only** implementation. The Mistral provider and the `--provider` CLI option are developed on **[`feature/mistral-integration`](https://github.com/ReemaPandya/lease_extraction_gemini/tree/feature/mistral-integration)**. To run Mistral, check out that branch first. The successful JSON-mode workaround and rent-condition prompt refinement were tested locally; ensure those latest local changes have been committed and pushed to the feature branch before expecting a fresh clone to reproduce that result.
+>
+> **Verification scope:** Live end-to-end extraction and a three-run consistency experiment were completed for the **one-page rent-change notice** with `ministral-8b-2512`. Larger lease documents have been exercised by local planning/mocked tests, but comparable live accuracy tests are still outstanding.
 
-## Get a free API key (recommended model: `gemini-3.8-flash`)
+## Project status at a glance
 
-1. Sign in at **https://aistudio.google.com/api-keys**.
-2. Accept the terms. Create or choose a Google Cloud project, and select **Create API key** if no default key exists.
-3. Copy the secret key. New AI Studio keys are authorization keys; do not use an old unrestricted standard key.
-4. **Keep the project on the Free billing tier**. Do not click Upgrade / Set up billing merely to use the free tier. Check your model's live quota and rate limits at **https://aistudio.google.com/rate-limit**.
-5. Configure your shell with the key, keeping it **out of source files, screenshots, Git, and chats**.
+| Area | Accomplished | Remaining / not yet verified |
+| --- | --- | --- |
+| PDF processing | Local searchable-PDF text extraction with 1-based page IDs | Selective OCR for scanned/image-only pages |
+| Extraction | Grouped simple fields, separate specialist stages, bounded evidence retrieval | Full live runs and factual review for 9-page AST and 70-page commercial lease |
+| Output quality | Supplied JSON Schemas preserved; local validation; page-evidence checks | Human-reviewed ground truth, field-level precision/recall, stronger semantic checks |
+| Cost controls | Fewer planned API calls, no PDF image upload, prompt-aware stage cache | Measured cost/latency comparisons against the original image-based baseline |
+| Providers | Gemini on `main`; Gemini + Mistral on the feature branch | Cross-provider benchmarking on identical configurations and all document types |
+| Testing | Offline tests, keyless dry-run, successful live notice extraction, three uncached Mistral runs | Clean-environment verification and broader error/consistency testing |
 
-**Windows PowerShell:**
+### Why Mistral was added
 
-```powershell
-$env:GEMINI_API_KEY="paste-your-real-key-here"
-python scripts/check_gemini_key.py
-```
+The project began with the Gemini Developer API, and Gemini successfully extracted the rent notice. During iterative testing, however, the tested Gemini project/model reached a **20-request-per-day quota**, while attempts on the commercial lease also encountered a `MAX_TOKENS` response. HTTP 429 quota errors prevented further tests that day.
 
-**macOS / Linux (bash or zsh):**
+Mistral was added **to continue development within the available free-tier limits**, **not** because it had been proven more accurate. The tested Mistral account showed a monthly included API allowance and higher token-throughput limits for `ministral-8b-2512` than for the initially attempted Mistral Small model. Mistral also encountered rate limits and strict-schema generation errors; a targeted JSON-mode workaround was used for the Ministral key-dates stage. **Both providers remain available on the feature branch.** Quotas and allowances depend on the provider, model, and account and can change.
 
-```bash
-export GEMINI_API_KEY='paste-your-real-key-here'
-python scripts/check_gemini_key.py
-```
+## Quick start: clone and install
 
-The script makes **one tiny authenticated request** without uploading any PDFs and should print `Gemini key is working`. Environment variables set in a terminal persist only for that terminal session. The script never echoes the key. Checking a key consumes a small amount of free API quota.
-
-Google's free tier is rate- and model-limited. If your account can't access `gemini-3.8-flash`, check the supported models/rate limits in AI Studio; a possible alternative is `gemini-3.5-flash-lite` (confirm model availability in your project before selecting it). The CLI accepts `--model` to choose an accessible free-tier model; it never silently switches models. `gemini-2.5-flash` is legacy and may not be accessible to new projects.
-
-## Install and run
-
-Requires Python 3.10 or higher. Gemini requests use the Python standard library; **no `openai` or Google AI SDK dependency** is required. Run from the unzipped project's root directory.
-
-**macOS / Linux:**
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install -e '.[test]'
-pytest -q
-python scripts/check_gemini_key.py
-
-# Keyless request plan; no document content leaves your computer:
-lease-extract --type 'Lease: Residential (AST)' \
-  --input 'sample_inputs/AST nt 2.pdf' --dry-run
-
-# Live extraction: inspect/redact the sample PDF before using the free API.
-lease-extract --type 'Lease: Residential (AST)' \
-  --input 'sample_inputs/AST nt 2.pdf' \
-  --output 'output/residential.json' --request-delay 5
-
-# Run all three samples if their contents are safe to send:
-bash scripts/run_samples.sh --request-delay 5
-```
-
-**Windows PowerShell:**
+Clone the repository and enter its root:
 
 ```powershell
+# Windows PowerShell
+git clone https://github.com/ReemaPandya/lease_extraction_gemini.git
+cd lease_extraction_gemini
+
 py -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -e '.[test]'
-pytest -q
-python scripts/check_gemini_key.py
-
-lease-extract --type 'Notice: Rent Change' --input 'sample_inputs/rent increase 2025-2026 NT2.pdf' --output 'output/notice.json' --request-delay 5
-# Or, to process all three samples:
-.\scripts\run_samples.ps1 -RequestDelay 5
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -e ".[test]"
+.\.venv\Scripts\python.exe -m pytest -q
 ```
 
-If PowerShell blocks virtual-environment activation, use `.\.venv\Scripts\python.exe` instead of activating it (e.g. `.\.venv\Scripts\python.exe -m pip install -e ".[test]"`).
-
-The live extraction writes `output/residential.json` and `output/residential.manifest.json` (or the paths chosen with `--output`). The first is validated JSON data; the second logs page selection, cache hits, token usage, validation warnings, and file hashes. For a simple keyless command you can run `lease-extract --list-types`, `lease-extract --dry-run ...` or `pytest -q` without any API key.
-
-**Useful controls:** `--model gemini-3.8-flash` (default), `--thinking-level low|medium|high` (default medium), `--request-delay 5` (seconds between Gemini calls), `--max-output-tokens 14000`, `--refresh` (ignore cache), `--strict-evidence` (fail on unverifiable quotations). Input and output filenames can contain spaces when quoted.
-
-**Troubleshooting:**
-
-- **`GEMINI_API_KEY is missing`**: Set the environment variable in the same terminal in which you run the command. Make sure it is `GEMINI_API_KEY`.
-- **HTTP 401/403**: The key is invalid, restricted incorrectly, or lacks access to the project/model. Create a new authorization key in AI Studio. Check your region/project permissions.
-- **HTTP 404**: Your chosen model ID isn't accessible; review the currently available free-tier models and use `--model <accessible-model>`.
-- **HTTP 429**: You reached an RPM/RPD/token limit. Try `--request-delay 10`, or return after your free quota refreshes. **Do not upgrade to a paid tier unless you want to pay.** The provider retries transient errors twice, then fails clearly.
-- **HTTP 400**: Usually a request size/schema/model configuration issue. Try a smaller `--specialty-budget`, or check that the model supports JSON Schema. The full original schema is still validated locally.
-- **Output incomplete / MAX_TOKENS**: Try a higher `--max-output-tokens` within your model's limits. Thinking tokens count toward output; larger settings can consume quota faster.
-- **Sensitive sample data**: Free tiers are not suitable for confidential tenant information. Remove/redact sensitive personal data _before_ extracting, or use an approved privacy-protecting service instead.
-
-The free tier is **free within quota**, not unlimited, and its request limits may change. See [Gemini pricing](https://ai.google.dev/gemini-api/docs/pricing), [API key guide](https://ai.google.dev/gemini-api/docs/api-key), and [Gemini API terms](https://ai.google.dev/gemini-api/terms).
-
-## Inputs and output shape
-
-The included `document_types.json` is **not** a single output schema. It is an array of document types, each with fields. Five scalar fields have `schema: {}`, and each specialist field supplies a separate JSON schema for the response _inside that field's slot_. We construct and enforce the logical combined schema:
-
-```json
-{
-  "effective_date": "2025-10-01",
-  "property_address": "...",
-  "description": "...",
-  "landlord_name": "...",
-  "tenant_name": "...",
-  "Consideration": {
-    "consideration": [],
-    "rent_model_terms": [],
-    "contingent_consideration": []
-  },
-  "key_dates": {
-    "key_dates": [],
-    "term": {
-      "term_period": "...",
-      "term_start_date": "...",
-      "term_end_date": "...",
-      "is_fixed_term": false,
-      "internal_source": "...",
-      "internal_evidence": []
-    }
-  }
-}
-```
-
-**This JSON fragment illustrates the envelope only; it is not a real extraction result.** The notice uses capitalized `Consideration` in the _outer_ field name while its inner schema uses lowercase `consideration`; the implementation preserves this distinction. Lease document types additionally have a `consideration_review` slot. To print the _complete_ combined schema, use:
+Or on macOS/Linux:
 
 ```bash
-lease-extract --type 'Notice: Rent Change' --emit-schema > output_schema.json
+git clone https://github.com/ReemaPandya/lease_extraction_gemini.git
+cd lease_extraction_gemini
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e '.[test]'
+python -m pytest -q
 ```
 
-General (schema-less) fields are strings because the supplied definitions have `item_type: string`. Specialist values are stored as the exact objects required by their supplied JSON schemas, not flattened into root fields. No required field is discarded or renamed. Missing values use only schema-permitted representations. The pipeline never silently repairs malformed output by substituting empty arrays/strings.
+The runtime needs **PyMuPDF** and **jsonschema** (installed from `pyproject.toml`); **pytest** is installed by the `[test]` extra. **Gemini and Mistral are hosted API models, not models downloaded or installed locally.** The production provider adapters use Python's **standard-library HTTP client**; neither provider requires the vendor SDK for pipeline execution.
 
-## Architecture
+### Required input files
+
+`sample_inputs/document_types.json` is tracked in Git. The original PDFs are **not tracked** (`*.pdf` is ignored to avoid publishing potentially sensitive legal documents). To run the supplied examples, obtain the PDFs from the assignment package and place them locally at these paths:
 
 ```text
-PDF bytes + document_types.json
-    |
-    +-- SHA-256 of the actual source PDF (cache invalidation)
-    |
-    +-- PyMuPDF extract each page's searchable text once (1-based page ids)
-    |
-    +-- Deterministic source selection: small PDFs full; large PDFs chunked,
-    |   lexical/BM25 retrieval, curated lease-domain anchors, fixed character budgets
-    |
-    +-- Planning: ONE grouped request for all simple fields
-    |             ONE request per independent complex schema
-    |       (commercial/AST: 4 requests; rent-change notice: 3)
-    |
-    +-- Gemini 3.8 Flash via REST, responseJsonSchema structured outputs
-    |       - complete field-specific extraction description is retained
-    |       - document text explicitly treated as untrusted data
-    |       - no page images or repeated full-document image transmission
-    |
-    +-- jsonschema validation (original, authoritative source schema)
-    |       + optional strict verbatim evidence verification by cited PDF page
-    |       + max 1 corrective regeneration if invalid; otherwise fail loudly
-    |
-    +-- content-addressed, atomic, independently validated per-stage cache
-    |
-    +-- validated document envelope, stable canonical JSON + audit manifest
+sample_inputs/
+  document_types.json
+  rent increase 2025-2026 NT2.pdf
+  AST nt 2.pdf
+  2025.08.22 - 4th Fl, RSH - Lease - Signed by Landlord.pdf
 ```
 
-**Why not put every specialist schema in one response?** The real prompts are very large (~6k–87k _characters per field_). Their domain rules and nested schemas differ markedly; merging them risks context overload, smaller output headroom, competing instructions, and harder validation. Batching the five simple fields but isolating the intricate `consideration`, `consideration_review`, and `key_dates` schemas is a pragmatic accuracy/cost tradeoff.
+You may instead supply any local **searchable** PDF with `--input`, paired with an appropriate type in the JSON definitions. Do **not** commit confidential PDFs or API credentials. The live API receives selected **plaintext excerpts** from the PDFs; it does not receive the PDF binary or rendered images.
 
-**Why not summarize the field descriptions?** The supplied descriptions impose domain-specific gate rules, exclusions, and evidence requirements. Dropping them could change the meaning of the task. Instead, the full descriptions are retained, while only the **source document** is selectively retrieved for the long lease. We keep the original schema for validation and pass a strict-output-compatible copy to the provider (the supplied schemas are already fully required and closed). No model call is needed to read pages or retrieve text.
+## Run with Gemini (`main` or feature branch)
 
-**Text and page provenance:** Digital PDF text is read locally. Page markers refer to _physical, 1-based PDF pages_, not printed page numbers. Each chunk retains a source offset. For single-page and shorter documents, selection sends all extractable text: the 1-page notice and all 9 pages of the AST are fully supplied to their specialist calls. The 70-page commercial lease uses keyword-ranked chunks, includes the first page, and reports its per-stage selected pages. Blank or image-only PDFs fail loudly rather than inventing OCR output. Production OCR is an explicit future extension.
+1. Create an API key at [Google AI Studio](https://aistudio.google.com/api-keys).
+2. Check model availability and your actual free-tier limits at [AI Studio rate limits](https://aistudio.google.com/rate-limit). The repository's configured default is `gemini-3.8-flash`; model access is account-dependent.
+3. Set the key **in your current terminal session** (never in a committed file):
 
-## Cost rationale and measured dry-run proxies
-
-Run `--dry-run` to see the exact planned selection/character counts locally. On the supplied documents with default budgets:
-
-| Input              | Pages | Current baseline calls | Proposed first-pass calls | Baseline sent page-images | Proposed sent page-images |
-| ------------------ | ----: | ---------------------: | ------------------------: | ------------------------: | ------------------------: |
-| Rent-change notice |     1 |                      7 |                     **3** |                         7 |                     **0** |
-| Residential AST    |     9 |                      8 |                     **4** |                        72 |                     **0** |
-| Commercial lease   |    70 |                      8 |                     **4** |                       560 |                     **0** |
-
-The baseline transmits all page images for **every** field. Our pipeline never transmits PDF images. The savings are in avoided image encoding/tokens, eliminating duplicate full-document visual context, grouping general fields, and bounded source retrieval for long documents. Cache hits require **zero model calls**. The `--dry-run` output uses `characters / 4` only as an **explicitly approximate** input-token proxy, including descriptions and source text. It is not a measured token bill. The number of calls above excludes validation retries, and neither image-token pricing nor a real baseline run has been measured; therefore **we do not claim a dollar or percentage savings**.
-
-For example, the commercial lease's local text is approximately 135k characters. Each complex-field request selects no more than 42k characters of source evidence by default. That bound does not apply to the (unchanged) specialist extraction description or its response schema. `--specialty-budget 140000` retains the full document for higher-recall experiments, at higher token cost.
-
-## Consistency and validation
-
-1. **Repeatability of source processing:** sorted, deterministic lexical retrieval; stable tie-breaking; source page numbers; stable prompt construction. Modern Gemini sampling/"thinking" can vary between calls; caching provides exact repeated bytes on identical inputs.
-2. **Stable outputs on identical inputs:** content-addressed cache includes the full PDF SHA-256, source excerpts, complete prompts, model settings identifier, stage schema, strict-evidence option, and pipeline version. A cache hit does not invoke the provider. Cache writes are atomic, and cached data is validated again on use. `--refresh` bypasses cache for a genuine repeat measurement.
-3. **Output contracts:** Gemini JSON Schema at generation and `jsonschema` validation against **the supplied source schema** afterward. Validation errors lead to bounded corrective retry (one) rather than silent filling. Final output validates against the constructed envelope schema. Failures do not generate fake partial results.
-4. **Evidence checking:** `internal_evidence` source `page` and literal `text` are checked against locally extracted page text. By default, mismatches appear in the manifest as warnings (the PDF's line layout can cause legitimate excerpts to mismatch). `--strict-evidence` retries and then rejects unverified quotations.
-5. **Deterministic serialization:** JSON properties have sorted keys and stable UTF-8 indentation. All outputs can be compared by SHA-256.
-
-To assess **true LLM-run stability, independent of caching**, run the included live-API harness (consumes API quota; could be charged if you enable billing):
-
-```bash
-python scripts/measure_consistency.py \
-  --input 'sample_inputs/AST nt 2.pdf' \
-  --type 'Lease: Residential (AST)' \
-  --runs 3 --output-dir 'output/ast_consistency'
+```powershell
+$env:GEMINI_API_KEY = "YOUR_GEMINI_API_KEY"
 ```
 
-It uses **no cache**, writes individual JSON and manifests, and reports exact-document match, field-level match fraction, and actual tokens. For large nested outputs, increase the output cap if Gemini returns `MAX_TOKENS`, for example:
+4. Check the connection (one small API call, **no document uploaded**):
 
-```bash
-python scripts/measure_consistency.py \
-  --input 'sample_inputs/2025.08.22 - 4th Fl, RSH - Lease - Signed by Landlord.pdf' \
-  --type 'Lease: Commercial' \
-  --runs 3 --max-output-tokens 24000 --thinking-level low --request-delay 15 \
-  --output-dir 'output/commercial_consistency'
+```powershell
+.\.venv\Scripts\python.exe scripts\check_gemini_key.py
 ```
 
-The measurement script records the model, output-token cap, thinking level, and request delay in its summary. Use `--request-delay` to stay below the project's requests-per-minute quota; 15 seconds leaves a conservative margin for a 5 RPM limit. Increasing the cap can increase quota use; lower thinking leaves more of the output budget for the structured response. For benchmarking accuracy, hand-label the relevant values _and literal sources_ per PDF, then compare field-level exact matches and numeric/date normalization, measure false positives, and review any page-evidence warning. For a cost baseline, measure input/output tokens and billed image input from a faithful implementation of the previous per-key image approach using the same model and documents.
+5. Run an extraction:
 
-## Tests and evidence coverage
-
-```bash
-pytest -q
+```powershell
+# Works on the default main branch; --provider is NOT supported on main.
+.\.venv\Scripts\python.exe -m lease_extract `
+  --model gemini-3.8-flash `
+  --type "Notice: Rent Change" `
+  --input "sample_inputs\rent increase 2025-2026 NT2.pdf" `
+  --output "output\notice_gemini.json" `
+  --thinking-level low `
+  --request-delay 5
 ```
 
-24 local tests cover: three end-to-end sample document/schema combinations with a stubbed provider, schema fidelity for all specialist field types, the notice's case-sensitive slot, duplicate/missing/wrong-type detection, retrieval determinism and budget, source page verification, automatic validation retries, source-byte cache invalidation, and 26 manually selected phrases present in the expected retrieved evidence for all three PDFs.
+On `feature/mistral-integration`, the same command works; you can also include `--provider gemini`. If you do not set `--provider` on that branch, Gemini remains the default.
 
-This **26/26 coverage is only a small retrieval sanity check**, not extraction-level precision/recall or verification of the model output. The fake model returns valid empty values purely to exercise orchestration. It makes no claims about lease interpretation. Real quality measurement requires an API key and reviewed ground truth. Input PDFs and the document definitions are included for reproducibility.
+**macOS/Linux:** Set `export GEMINI_API_KEY='YOUR_GEMINI_API_KEY'`, and use the equivalent command with `/` paths and `\` shell line continuations rather than PowerShell backticks.
 
-## Operational choices and tradeoffs
+## Run with Mistral (`feature/mistral-integration` only)
 
-- **Model:** `gemini-3.8-flash` is the default; change with `--model` to another accessible free-tier Gemini model. The project uses the Gemini `generateContent` REST endpoint with `responseJsonSchema` and local JSON Schema validation. New Gemini models deprecate arbitrary sampling-temperature adjustments, so the client does not send `temperature`. See [Google structured outputs](https://ai.google.dev/gemini-api/docs/structured-output) and [Gemini 3.8 Flash](https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash/).
-- **Recall vs cost:** Chunk selection is transparent, simple, and reproducible, but cannot guarantee all relevant clauses of a complex 70-page lease are chosen. Use a larger `--specialty-budget` or a two-pass high-recall section discovery + extraction on long documents. The default budget is a _cost/recall hypothesis_, not an empirically optimal threshold.
-- **No unrequested OCR:** The supplied PDFs are text-searchable. For scanned pages, a production version would extract images selectively and OCR only unreadable pages, with confidence checks and the original PDF coordinates preserved. This is a deliberate gap, not an invisible fallback.
-- **No silent semantic modifications:** JSON schema guarantees shape and enum legality, not correctness of `payment_amount`, parties, dates, or clause interpretation. Numeric reconciliation and date comparison against cited evidence are valuable additional domain checks.
-- **External service failure:** The standard-library REST client retries transient HTTP 429/5xx/network failures with bounded exponential backoff; schema validation can retry once; rejected or truncated outputs cause explicit errors. Atomic cache writes prevent half-written cached stages. Per-stage cache survives failures in later stages.
-- **Privacy/security:** No input PDF is sent as a binary file; selected plaintext excerpts are sent to the configured model API. Do not process sensitive tenant information without suitable consent, contractual terms, retention controls, and secure cache storage. The `.gitignore` excludes output, cache, and `.env`, but production needs encryption, redaction and access controls. **The free Gemini tier explicitly permits data use for improving Google products; do not submit sensitive or confidential information.** Source PDFs are for test/demo and should be managed appropriately.
-- **Auditability:** The manifest exposes which PDF pages were presented to the model; it does not assert that unselected pages were irrelevant or that output is legally authoritative.
+**Important:** The `main` branch does **not** recognize `--provider mistral`. Switch to the Mistral branch first:
 
-## Next improvements with more time / a live API key
+```powershell
+git fetch origin
+git switch feature/mistral-integration
+.\.venv\Scripts\python.exe -m pip install -e ".[test]"
+.\.venv\Scripts\python.exe -m pytest -q
+```
 
-1. Create a manually reviewed **ground-truth set**, including multi-clause commercial consideration and rent-review rules, with adjudicated evidence pages and difficult negative cases (service charges, deposits, inferred dates).
-2. Run full, 42k, and intermediate retrieval budgets, score recall/precision and wall-clock/billed token cost, and pick thresholds based on measured error rather than intuition.
-3. Split long specialty extraction by _discovered clause families_ using an evidence inventory and deduplicated reducer where the model's output limits are a bottleneck, instead of increasing context indefinitely.
-4. Implement selective OCR of pages with very little text, and hybrid semantic/BM25 retrieval with regression tests.
-5. Add domain validators (ISO dates, money reconciliation, source-to-output consistency), human-review flags for unresolved conflicts, and encryption/deletion policies for cached excerpts and PII.
+1. Create an API key in [Mistral Studio](https://console.mistral.ai/).
+2. Inspect your organization-specific usage and model limits in [Mistral Admin](https://admin.mistral.ai/).
+3. Set the key in the current PowerShell session:
 
-## Files
+```powershell
+$env:MISTRAL_API_KEY = "YOUR_MISTRAL_API_KEY"
+```
+
+4. Run the **successfully tested Ministral 8B model**:
+
+```powershell
+.\.venv\Scripts\python.exe -m lease_extract `
+  --provider mistral `
+  --model ministral-8b-2512 `
+  --type "Notice: Rent Change" `
+  --input "sample_inputs\rent increase 2025-2026 NT2.pdf" `
+  --output "output\notice_ministral.json" `
+  --max-output-tokens 4000 `
+  --request-delay 10
+```
+
+`mistral-small-2603` is the Mistral adapter's configured default, but attempts with that model hit HTTP 429 limits in the tested account. Therefore the live evaluation reported here used **`ministral-8b-2512` explicitly**. This does **not** imply that Ministral 8B is more accurate than Mistral Small.
+
+For a fresh end-to-end run without response-cache reuse, add `--no-cache` and write to a separate output path. The tested Ministral version uses **strict JSON Schema mode** for `general` and `Consideration`, and **JSON mode** for `key_dates` because that stage previously returned `finish_reason="error"` under constrained generation. The original JSON Schema is still validated locally. **Ensure the latest tested version of `src/lease_extract/mistral_provider.py` has been pushed**; an older feature-branch revision may still use strict mode for every stage.
+
+### Optional Mistral SDK connection smoke test
+
+The separate `test_mistral.py` on the feature branch uses the *vendor SDK* and therefore needs an additional, **optional** install. It is **not** required by the production pipeline:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install mistralai
+.\.venv\Scripts\python.exe test_mistral.py
+```
+
+The smoke-test model is set inside `test_mistral.py` and can differ from `--model` passed to the extraction CLI. Never commit or print the API key.
+
+## Keyless commands, validation, and outputs
+
+The following operations do **not** contact either provider:
+
+```powershell
+# List configured document types
+.\.venv\Scripts\python.exe -m lease_extract --list-types
+
+# Inspect planned calls, selected pages, and approximate input size
+.\.venv\Scripts\python.exe -m lease_extract `
+  --type "Notice: Rent Change" `
+  --input "sample_inputs\rent increase 2025-2026 NT2.pdf" `
+  --dry-run
+
+# Check a previously produced JSON file against the supplied schema
+.\.venv\Scripts\python.exe -m lease_extract `
+  --type "Notice: Rent Change" `
+  --validate "output\notice_ministral.json"
+
+# Print the combined output schema
+.\.venv\Scripts\python.exe -m lease_extract `
+  --type "Notice: Rent Change" --emit-schema
+```
+
+A successful extraction creates two files:
+
+- `output/<name>.json`: complete assembled extraction, validated against the supplied JSON Schema.
+- `output/<name>.manifest.json`: source hash, selected pages, per-stage cache hits, call counts, reported token usage, and evidence warnings.
+
+The supplied `document_types.json` is an **array of document-type definitions**, not one global JSON Schema. Each specialist field supplies its own nested schema; the pipeline assembles these into a single output envelope without renaming fields. For the notice, the outer name **`Consideration` is case-sensitive** and contains the lowercase `consideration`, `rent_model_terms`, and `contingent_consideration` arrays. The outer `key_dates` object contains `key_dates` records plus a `term` object. Simple fields are assembled as strings. Missing information must use schema-permitted representations; the pipeline should not invent facts.
+
+## Pipeline design
+
+```text
+Input: searchable PDF + document_types.json + selected document type
+  |
+  +-- SHA-256 of original PDF bytes
+  |
+  +-- Local PyMuPDF text extraction with physical 1-based page numbers
+  |
+  +-- Deterministic evidence retrieval and bounded source chunks
+  |
+  +-- Extraction plan
+  |     +-- One grouped request for simple fields
+  |     +-- One request per complex field/schema
+  |
+  +-- Provider adapter: Gemini (main) or Gemini/Mistral (feature branch)
+  |     +-- Structured JSON output request
+  |     +-- Selected plaintext evidence, not full PDF page images
+  |
+  +-- Validate against original JSON Schema
+  |     +-- Optional strict page-level evidence verification
+  |     +-- Bounded correction retry for locally invalid JSON
+  |
+  +-- Content-addressed, stage-level result cache
+  |
+  +-- Final validated JSON + per-stage audit manifest
+```
+
+**Why group only simple fields?** The supplied specialist descriptions and schemas are long and enforce distinct legal-data rules. Combining all complex fields into one model response could increase output pressure, reduce reliability, and make failures harder to isolate. The pipeline batches inexpensive string fields but processes intricate consideration, review, and key-date schemas separately.
+
+**What retrieval does:** For short documents it can send all extracted text; for larger ones it selects ranked excerpts using deterministic lexical matching, domain anchors, and character budgets. The field-specific descriptions are retained rather than silently summarized. For the 70-page commercial lease, retrieval is a cost/recall tradeoff and may miss relevant clauses; it is not guaranteed to be exhaustive. The dry-run estimates prompt tokens by character count and does not measure actual API billing.
+
+**Caching:** Each stage's cache key depends on the source PDF hash, prompt, schema, provider/model settings identifier, and pipeline version. A valid cache hit makes zero model calls; cached records are revalidated. After the notice `Consideration` prompt was refined locally, the measured run reused `general` and `key_dates` and invoked only `Consideration` once.
+
+**Evidence:** Model-provided quotations are checked against the cited physical PDF page. By default, mismatches are recorded as warnings; `--strict-evidence` makes them validation failures. Zero evidence warnings **does not prove** that every legal interpretation is correct.
+
+## Cost and call-count rationale
+
+The baseline described in the task renders pages to images and makes **one model request per field**, retransmitting all pages each time. The proposed first-pass call counts below come from local planning and **exclude retries**:
+
+| Document | Pages | Fields / baseline calls | Optimized planned calls | Baseline page-image transmissions | Pipeline page-image transmissions |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Rent-change notice | 1 | 7 | **3** | 7 | **0** |
+| Residential AST | 9 | 8 | **4** | 72 | **0** |
+| Commercial lease | 70 | 8 | **4** | 560 | **0** |
+
+The notice call reduction is **4/7, approximately 57%**. The residential/commercial numbers are plans, **not completed live comparisons**. Avoided image transmissions and call reductions indicate reduced overhead, but **dollar savings have not been measured against a faithful image-based baseline**.
+
+## Actual experiments and consistency
+
+### Live Ministral 8B: one-page rent notice
+
+One successful full extraction was run with `--no-cache`:
+
+| Metric | Observed |
+| --- | ---: |
+| PDF pages | 1 |
+| Document fields | 7 |
+| Model calls | 3 |
+| Input tokens | 5,135 |
+| Output tokens | 858 |
+| Total reported tokens | 5,993 |
+| Evidence warnings | 0 |
+
+The extracted notice described monthly rent changing **from £2,300 to £2,415 effective 1 October 2025**. Local review identified that a 5% annual-adjustment rationale is **not a condition precedent**; the notice-specific `Consideration` prompt was refined so `condition` remains empty unless the source expressly states a prerequisite. The original field schema was **not** modified.
+
+### Three uncached Ministral 8B runs
+
+```powershell
+# Feature branch; consumes real API usage
+.\.venv\Scripts\python.exe scripts\measure_consistency.py `
+  --provider mistral `
+  --model ministral-8b-2512 `
+  --input "sample_inputs\rent increase 2025-2026 NT2.pdf" `
+  --type "Notice: Rent Change" `
+  --runs 3 `
+  --output-dir "output\consistency_ministral_refined" `
+  --max-output-tokens 4000 `
+  --request-delay 10
+```
+
+| Metric | Observed |
+| --- | ---: |
+| Independent uncached runs | 3 |
+| Actual API calls | 9 |
+| Total input tokens | 15,819 |
+| Total output tokens | 2,464 |
+| Exact document-level JSON match | No |
+| Exactly stable top-level fields | 3 of 7 (**42.9%**) |
+
+The exactly stable top-level fields were `effective_date`, `landlord_name`, and `tenant_name`. Other differences included punctuation in `property_address`, phrasing in `description`, text of `targets_consideration_description`, and the number/choice of evidence quotations. The reviewed runs had matching core rent amounts and effective dates; all three refined `condition` fields were empty. **Exact JSON stability is not factual accuracy.** Agreement on a wrong value would still produce a stable result.
+
+Earlier **Gemini** three-run notice testing produced **4/7 exactly stable fields (57.1%)**, with 9 calls, 12,225 input tokens, and 19,660 reported output tokens (including reasoning tokens as reported by the Gemini client). These are **small, non-identical provider/model/prompt experiments**; they do **not** establish that either provider is more accurate or cheaper per correct extraction.
+
+To repeat this experiment with Gemini on either branch, use the same `scripts/measure_consistency.py` on the feature branch with `--provider gemini --model gemini-3.8-flash`, a distinct output directory, and account-appropriate rate limits. The main-branch script does not have the Mistral-specific CLI options.
+
+The tracked `evaluation/dry_run/` files are **planning snapshots**, and `evaluation/retrieval_spot_checks.json` contains small hand-picked evidence checks. Neither is a manually labeled factual-accuracy benchmark. The offline tests use mocked providers to verify control flow and schema behavior; they are not evidence of live extraction accuracy.
+
+## Troubleshooting
+
+| Problem | Action |
+| --- | --- |
+| `unrecognized arguments: --provider mistral` | You are on `main` or running an outdated installation. Switch to `feature/mistral-integration`, reinstall with `pip install -e ".[test]"`, and rerun. |
+| `GEMINI_API_KEY` or `MISTRAL_API_KEY` missing | Set the matching environment variable in the same terminal session; do not commit it. |
+| HTTP 401 / 403 | Verify the key, project, and account permissions. |
+| HTTP 404 / unknown model | Confirm model ID and access in the provider console. |
+| HTTP 429 | Check requests-per-second, tokens-per-minute, daily/monthly quotas and organization spending limits; a monthly allowance does not override throughput limits. Retrying immediately may not help. |
+| `finish_reason="error"` on Ministral `key_dates` | Ensure the feature branch includes the tested JSON-mode workaround; strict-schema generation failed for that stage in the earlier revision. |
+| `MAX_TOKENS` or `finish_reason="length"` | Adjust completion-token budget and/or split large specialty stages; higher token caps can increase quota demand. |
+| Schema validation failure | Inspect stage diagnostics; retain the source schema and correct prompt/provider behavior rather than filling missing facts automatically. |
+| `fitz` deprecation warning | The tracked PDF reader imports `fitz`; a future cleanup can replace it with `import pymupdf` and update uses accordingly. The warning is unrelated to API failures. |
+| PDF missing | Copy the assignment PDFs locally to `sample_inputs/`; they are deliberately not in Git. |
+| Image-only/scanned PDF | The current implementation intentionally fails rather than silently using OCR or inventing text. |
+
+## Controls and reproducibility
+
+- `--type`: exact document type name from `document_types.json`.
+- `--document-types`: alternate definitions file.
+- `--model`: explicit provider model ID.
+- `--provider {gemini,mistral}`: **feature branch only**; Gemini is the default.
+- `--thinking-level low|medium|high`: Gemini reasoning setting.
+- `--request-delay`: pause between API requests from the same provider instance (does not delay the first request).
+- `--max-output-tokens`: generation-token budget.
+- `--general-budget` / `--specialty-budget`: retrieved source text character budgets; reducing them may hurt recall.
+- `--no-cache`: bypass result caching for a genuine live test.
+- `--refresh`: recompute stages even if valid cache entries exist.
+- `--strict-evidence`: retry/fail on unverifiable evidence quotes.
+- `--dry-run`: no API call; prints planned stages and approximate token sizes.
+- `--emit-schema`: print the assembled schema; `--validate`: verify an existing JSON file without API calls.
+
+Each live run saves validated JSON and a manifest for reproducibility. Cached requests do not prove repeatability of new model generations; use the uncached consistency script for that purpose. Python requirements and CLI entry point are defined in `pyproject.toml`.
+
+## Security, privacy, and known limitations
+
+- **Never put API keys in code, README examples, screenshots, logs, or Git.** Rotate a key if it has been exposed. `.env`, virtual environments, caches, outputs and PDFs are Git-ignored.
+- **The repository is public.** The lease PDFs are excluded for confidentiality; original documents should be provided through a separately approved channel.
+- API calls transmit selected **document text** to a third party. Confirm consent, data-processing terms, and eligibility for the chosen free or paid plan before processing sensitive tenant or landlord information. Free-tier terms may allow provider training/data use.
+- Scanned PDFs do not currently have an OCR fallback. Encryption, production access controls, redaction, and retention/deletion policies for cached personal data remain future work.
+- Schema validity and verbatim page quotes cannot verify legal interpretation. A human should review material dates, amounts, rights, and parties.
+- Large-document retrieval may miss important clauses. No full human-labeled precision/recall, end-to-end commercial/AST live benchmark, or measured wall-clock/dollar-cost baseline is available yet.
+- A temperature-zero request and fixed seed do **not** guarantee identical output; the consistency experiment demonstrates observable variability.
+
+## Repository layout
 
 ```text
 src/lease_extract/
-    cli.py          CLI, dry-run, output schema and validation commands
-    spec.py         Real-world document-type loading + envelope construction
-    pdf.py          Local PDF parsing with physical PDF page IDs
-    retrieval.py    Deterministic ranked, bounded high-recall evidence selection
-    pipeline.py     Grouping, prompting, validation, cache orchestration, manifest
-    provider.py     Free-tier Gemini REST client, JSON Schema conversion, retries, usage capture
-    validation.py   Schema + page-evidence checks, canonical JSON
-    cache.py        SHA-256 keyed atomic cache
+  cli.py               CLI, dry run, JSON validation, output/manifest
+  spec.py              Document-type loading and schema-envelope construction
+  pdf.py               Local PyMuPDF PDF text reading, source page numbers
+  retrieval.py         Deterministic evidence chunk selection
+  pipeline.py          Stages, prompts, retries, cache, final assembly
+  provider.py          Gemini REST provider
+  mistral_provider.py  Mistral REST provider (feature branch only)
+  validation.py        JSON Schema and source-evidence checks
+  cache.py             Content-addressed stage cache
 scripts/
-    run_samples.sh          Full sample batch invocation (bash)
-    run_samples.ps1         Full sample batch invocation (PowerShell)
-    check_gemini_key.py     Minimal API-key smoke test (sends no PDF)
-    measure_consistency.py  Billed, genuinely uncached repeated-run test
-sample_inputs/             Exact source PDFs and document_types.json
-evaluation/                Hand-picked source evidence recall checkpoints
-tests/                     Offline pytest suite; fake provider clearly scoped
+  check_gemini_key.py  Gemini connectivity smoke test
+  measure_consistency.py  Independent uncached repeated-run evaluation
+  run_samples.ps1 / run_samples.sh  Gemini sample batch helpers
+sample_inputs/
+  document_types.json  Tracked extraction definitions
+  *.pdf                Local-only: obtain from assignment package
+assessment output is written under output/ (not committed)
+evaluation/              Planning snapshots and retrieval spot checks
+tests/                   Offline provider and pipeline tests
+pyproject.toml           Dependencies, console entry point, pytest config
+test_mistral.py          Optional SDK smoke test (feature branch)
 ```
+
+## Future work
+
+1. Complete live, human-reviewed AST and commercial lease extractions; compare with a labeled reference set.
+2. Compare extraction factual correctness, cost, and latency across providers on the **same** document, schema, prompts, and evaluation protocol.
+3. Add selective OCR for scanned pages and higher-recall retrieval/section discovery for long contracts.
+4. Add deterministic formatting for non-substantive variations while preserving source quotations and surfacing conflicting facts for human review.
+5. Split oversized specialist requests when needed; strengthen source-to-output semantic validation and error recovery.
+6. Verify a clean clone with all required local inputs and the final committed feature-branch fixes.
+
+---
+
+**Submission note:** The evaluator should use `main` for the original Gemini implementation and [`feature/mistral-integration`](https://github.com/ReemaPandya/lease_extraction_gemini/tree/feature/mistral-integration) for Mistral support. The feature branch is experimental and must include the latest tested local fixes before it can reproduce the reported successful Ministral extraction.

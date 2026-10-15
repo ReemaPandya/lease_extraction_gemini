@@ -63,6 +63,30 @@ def _build_prompt(stage: Stage, pdf: PDFDocument, doc_type: DocumentType) -> str
         f"FIELD {f.name!r} EXTRACTION REQUIREMENTS:\n{f.description or f'Extract the {f.name} from the source document.'}"
         for f in stage.fields
     )
+
+    # Clarify the meaning of "condition" in rent-change notices.
+    # Do not modify the supplied JSON schema.
+    if (
+        doc_type.name == "Notice: Rent Change"
+        and any(f.name == "Consideration" for f in stage.fields)
+    ):
+        instructions += (
+            "\n\nIMPORTANT RULE FOR consideration[].condition:\n"
+            "The 'condition' field describes only an explicit prerequisite "
+            "that must be satisfied BEFORE the fixed payment obligation "
+            "takes effect.\n"
+            "If the source document does not explicitly state such a "
+            "prerequisite, return an empty string: \"\".\n"
+            "Do NOT treat the reason for a rent increase, an annual "
+            "adjustment percentage, a rent calculation mechanism, "
+            "or an effective date as a condition precedent.\n"
+            "For example, 'in line with the agreed 5% minimum annual "
+            "adjustment' explains the basis of an increase; it is NOT "
+            "a condition that must be satisfied before rent becomes payable.\n"
+            "If an actual prerequisite is expressly stated, extract it "
+            "and provide supporting evidence from the document."
+        )
+
     return (
         f"DOCUMENT TYPE: {doc_type.name}\nDOCUMENT TITLE: {pdf.title}\n"
         f"TASK: extract fields {', '.join(f.name for f in stage.fields)}.\n\n"
