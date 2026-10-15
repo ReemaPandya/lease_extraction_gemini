@@ -1,3 +1,4 @@
+
 """Command line interface. `--dry-run` requires no credentials."""
 import argparse
 import json
@@ -8,6 +9,7 @@ from .pdf import read_pdf
 from .retrieval import Selection
 from .pipeline import execute_pipeline, plan_stages, _build_prompt, SYSTEM_PROMPT
 from .provider import GeminiProvider, DEFAULT_MODEL
+from .mistral_provider import MistralProvider, DEFAULT_MISTRAL_MODEL
 from .cache import Cache
 from .validation import canonical_json, validate_result
 
@@ -21,10 +23,14 @@ def make_parser() -> argparse.ArgumentParser:
     p.add_argument("--document-types", default=str(DEFAULT_TYPES), help="document_types.json")
     p.add_argument("--type", help="Document type name, e.g. 'Lease: Residential (AST)'")
     p.add_argument("--output", default="output/extraction.json", help="Final JSON result path")
-    p.add_argument("--model", default=DEFAULT_MODEL, help="Gemini model (default: gemini-3.8-flash)")
+    p.add_argument("--provider", choices=("gemini", "mistral"), default="gemini",
+                   help="API provider (default: gemini, preserving existing commands)")
+    p.add_argument("--model", default=None,
+                   help="Model identifier (default depends on --provider)")
     p.add_argument("--thinking-level", choices=("low", "medium", "high"), default="medium", help="Gemini 3.8 reasoning level")
     p.add_argument("--request-delay", type=float, default=0.0, help="Seconds between model calls to respect free-tier RPM limits")
-    p.add_argument("--max-output-tokens", type=int, default=14000)
+    p.add_argument("--max-output-tokens", type=int, default=None,
+                   help="Max completion tokens (default: 14000 Gemini; 6000 Mistral)")
     p.add_argument("--general-budget", type=int, default=12000, help="Max evidence characters for grouped scalars")
     p.add_argument("--specialty-budget", type=int, default=42000, help="Max evidence characters per complex field")
     p.add_argument("--cache-dir", default=".lease_extract_cache")
@@ -81,13 +87,24 @@ def main(argv: list[str] | None = None) -> int:
             }
             print(canonical_json(plan), end="")
             return 0
-        provider = GeminiProvider(args.model, args.max_output_tokens,
-                                  request_delay=args.request_delay,
-                                  thinking_level=args.thinking_level)
+        model = args.model or (DEFAULT_MISTRAL_MODEL if args.provider == "mistral" else DEFAULT_MODEL)
+        max_tokens = (args.max_output_tokens if args.max_output_tokens is not None else
+                      (6000 if args.provider == "mistral" else 14000))
+        if args.provider == "mistral":
+            provider = MistralProvider(model, max_tokens,
+                                       request_delay=args.request_delay)
+        else:
+            provider = GeminiProvider(model, max_tokens,
+                                      request_delay=args.request_delay,
+                                      thinking_level=args.thinking_level)
         run = execute_pipeline(
             pdf, spec, provider,
             None if args.no_cache else Cache(args.cache_dir),
-            model_identifier=f"gemini:{args.model}|max_output={args.max_output_tokens}|thinking={args.thinking_level}",
+            model_identifier=(
+                f"mistral:{model}|max_output={max_tokens}|temp=0|seed=42"
+                if args.provider == "mistral" else
+                f"gemini:{model}|max_output={max_tokens}|thinking={args.thinking_level}"
+            ),
             general_budget=args.general_budget,
             specialty_budget=args.specialty_budget,
             refresh=args.refresh,
