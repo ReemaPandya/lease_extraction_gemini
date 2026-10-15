@@ -1,0 +1,80 @@
+{
+  "baseline_calls": 8,
+  "baseline_pdf_page_images_sent": 72,
+  "document_type": "Lease: Residential (AST)",
+  "pdf_pages": 9,
+  "pdf_text_characters": 18989,
+  "planned_calls_without_retries": 4,
+  "planned_pdf_page_images_sent": 0,
+  "stages": [
+    {
+      "instructions_plus_source_approx_tokens": 3381,
+      "name": "general",
+      "selected_chunks": 10,
+      "selected_pages": [
+        1,
+        2,
+        4,
+        6,
+        7,
+        8
+      ],
+      "selected_source_characters": 11963,
+      "total_chunks": 17
+    },
+    {
+      "instructions_plus_source_approx_tokens": 12373,
+      "name": "consideration",
+      "selected_chunks": 17,
+      "selected_pages": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "selected_source_characters": 19078,
+      "total_chunks": 17
+    },
+    {
+      "instructions_plus_source_approx_tokens": 15026,
+      "name": "consideration_review",
+      "selected_chunks": 17,
+      "selected_pages": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "selected_source_characters": 19078,
+      "total_chunks": 17
+    },
+    {
+      "instructions_plus_source_approx_tokens": 8354,
+      "name": "key_dates",
+      "selected_chunks": 17,
+      "selected_pages": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "selected_source_characters": 19078,
+      "total_chunks": 17
+    }
+  ]
+}

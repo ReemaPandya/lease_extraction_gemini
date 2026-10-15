@@ -1,0 +1,41 @@
+{
+  "baseline_calls": 7,
+  "baseline_pdf_page_images_sent": 7,
+  "document_type": "Notice: Rent Change",
+  "pdf_pages": 1,
+  "pdf_text_characters": 447,
+  "planned_calls_without_retries": 3,
+  "planned_pdf_page_images_sent": 0,
+  "stages": [
+    {
+      "instructions_plus_source_approx_tokens": 508,
+      "name": "general",
+      "selected_chunks": 1,
+      "selected_pages": [
+        1
+      ],
+      "selected_source_characters": 456,
+      "total_chunks": 1
+    },
+    {
+      "instructions_plus_source_approx_tokens": 1978,
+      "name": "Consideration",
+      "selected_chunks": 1,
+      "selected_pages": [
+        1
+      ],
+      "selected_source_characters": 456,
+      "total_chunks": 1
+    },
+    {
+      "instructions_plus_source_approx_tokens": 1867,
+      "name": "key_dates",
+      "selected_chunks": 1,
+      "selected_pages": [
+        1
+      ],
+      "selected_source_characters": 456,
+      "total_chunks": 1
+    }
+  ]
+}

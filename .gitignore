@@ -1,0 +1,42 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.egg-info/
+.lease_extract_cache/
+output/
+.env
+
+
+
+# Python
+
+venv/
+*.py[cod]
+.pytest_cache/
+build/
+dist/
+
+# Secrets
+.env.*
+!.env.example
+*api_key*
+credentials.json
+secrets.json
+
+# Generated results and cache
+output/
+.cache/
+cache/
+*.log
+
+# Local IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Confidential PDF inputs
+*.pdf

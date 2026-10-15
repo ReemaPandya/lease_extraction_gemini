@@ -1,0 +1,28 @@
+[
+  {
+    "pdf": "rent increase 2025-2026 NT2.pdf",
+    "checks": {
+      "general": ["Azil Capital Limited", "Sasha and Talia"],
+      "rent": ["£2,415", "£2,300"],
+      "dates": ["1st October 2025"]
+    }
+  },
+  {
+    "pdf": "AST nt 2.pdf",
+    "checks": {
+      "general": ["Saxon Investments", "Sacha Attiach", "5 Nugent Terrace"],
+      "rent": ["2300.00 Monthly"],
+      "review": ["Retail Price Index", "5%", "8%"],
+      "dates": ["2024-08-03", "1 year"]
+    }
+  },
+  {
+    "pdf": "2025.08.22 - 4th Fl, RSH - Lease - Signed by Landlord.pdf",
+    "checks": {
+      "general": ["SYSTEMIQ LIMITED", "Russell Square"],
+      "rent": ["£496,844.00", "£5,367.23", "one peppercorn", "Reduced Basic Rent"],
+      "review": ["Rent Review Date", "Surveyor", "greater"],
+      "dates": ["22 August", "Break Date", "2026"]
+    }
+  }
+]
